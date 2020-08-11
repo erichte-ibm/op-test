@@ -43,6 +43,7 @@ class OsSecureBoot(unittest.TestCase):
 
         # Shut itself off, turn it back on
         self.cv_BMC.run_command("obmcutil power on")
+        self.cv_SYSTEM.sys_check_host_status()
         #self.cv_SYSTEM.sys_power_on()
         #self.cv_SYSTEM.goto_state(OpSystemState.PETITBOOT_SHELL)
         # check empty keys?
@@ -50,9 +51,8 @@ class OsSecureBoot(unittest.TestCase):
     def addSecureBootKeys(self):
         self.cv_SYSTEM.goto_state(OpSystemState.OS)
         for k in ["PK", "KEK", "db"]:
-            # TODO: This probably has to be done differently for skiroot. not sure how copying is going to work........
-            self.cv_HOST.copy_test_file_to_host(k + ".auth", sourcedir=os.path.join("test_binarie","keys"))
-            self.cv_HOST.run_command("cat /tmp/{0}.auth > /sys/firmware/secvar/vars/{0}/update".format(k))
+            self.cv_HOST.copy_test_file_to_host(k + ".auth", sourcedir=os.path.join("test_binaries","keys"))
+            self.cv_HOST.host_run_command("cat /tmp/{0}.auth > /sys/firmware/secvar/vars/{0}/update".format(k))
 
         # System needs to power fully off to process keys on next reboot
         self.cv_SYSTEM.sys_power_off()
@@ -60,13 +60,12 @@ class OsSecureBoot(unittest.TestCase):
         # TODO: expect secvar logs from skiboot
 
 
-    def checkSecureBootEnabled(self):
+    def checkSecureBootEnabled(self, enabled=True):
         self.cv_SYSTEM.goto_state(OpSystemState.OS)
-        # TODO: expect rc = nonzero, this shouldn't be there
-        self.cv_HOST.run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/os-secure-enforcing")
-        # TODO: expect rc = ok for these two
-        self.cv_HOST.run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/physical-presence-asserted")
-        self.cv_HOST.run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/clear-os-keys")
+
+        self.cv_HOST.host_run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/os-secure-enforcing")
+        #self.cv_HOST.host_run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/physical-presence-asserted || true")
+        #self.cv_HOST.host_run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/clear-os-keys || true")
 
 
     def runTest(self):
