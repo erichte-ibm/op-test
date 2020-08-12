@@ -5,6 +5,25 @@ import OpTestConfiguration
 
 from common.OpTestSystem import OpSystemState
 
+"""
+THE PLAN:
+
+ - assert physical presence
+   - clears any existing keys
+   - gets the machine in a known state without secureboot
+ - enroll a set of PK, KEK, db
+   - pregenerated, use secvar sysfs interface
+   - ideally do this in skiroot
+ - reboot, and ensure secure boot is now enabled
+ - successfully boot a signed kernel
+ - fail to boot an unsigned/improperly signed kernel
+ - fail to boot a dbx'd kernel
+ - assert physical presence
+   - ensure machine is in a non-secure boot state
+
+
+"""
+
 
 class OsSecureBoot(unittest.TestCase):
     def setUp(self):
@@ -42,11 +61,14 @@ class OsSecureBoot(unittest.TestCase):
         raw_pty.expect("shutdown complete", timeout=30)
 
         # Shut itself off, turn it back on
+        # Need to turn it on by the BMC for some reason?
         self.cv_BMC.run_command("obmcutil power on")
+
+        # This is apparently needed because otherwise op-test can't determine
+        # the state of the machine?
         self.cv_SYSTEM.sys_check_host_status()
-        #self.cv_SYSTEM.sys_power_on()
-        #self.cv_SYSTEM.goto_state(OpSystemState.PETITBOOT_SHELL)
-        # check empty keys?
+
+        # TODO: check for empty keys/non-secureboot state
 
     def addSecureBootKeys(self):
         self.cv_SYSTEM.goto_state(OpSystemState.OS)
@@ -60,6 +82,8 @@ class OsSecureBoot(unittest.TestCase):
         # TODO: expect secvar logs from skiboot
 
 
+    # TODO: figure out how to detect secure boot state
+    # TODO: handle either enabled or not enabled
     def checkSecureBootEnabled(self, enabled=True):
         self.cv_SYSTEM.goto_state(OpSystemState.OS)
 
