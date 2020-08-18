@@ -1,9 +1,10 @@
 import unittest
-import os
+import os, time
 
 import OpTestConfiguration
 
 from common.OpTestSystem import OpSystemState
+from common.OpTestInstallUtil import InstallUtil
 
 """
 THE PLAN:
@@ -32,7 +33,17 @@ class OsSecureBoot(unittest.TestCase):
         self.cv_BMC = conf.bmc()
         self.cv_HOST = conf.host()
         self.cv_IPMI = conf.ipmi()
+        self.OpIU = InstallUtil()
 
+    def getTestData(self, data="keys"):
+        con = self.cv_SYSTEM.console
+        self.OpIU.configure_host_ip()
+
+        fil = "os{}.tar".format(data)
+        url = "http://x86tpm2server.rtp.stglabs.ibm.com:8000/{}".format(fil)
+
+        con.run_command("wget {0} -O /tmp/{1}".format(url, fil))
+        con.run_command("tar xf /tmp/{} -C /tmp/".format(fil))
 
     def assertPhysicalPresence(self):
         self.cv_SYSTEM.goto_state(OpSystemState.OFF)
@@ -68,47 +79,85 @@ class OsSecureBoot(unittest.TestCase):
         # the state of the machine?
         self.cv_SYSTEM.sys_check_host_status()
 
-        # TODO: check for empty keys/non-secureboot state
+        self.checkSecureBootEnabled(enabled=False, physical=True)
+        # TODO: test empty keys
+
+        
 
     def addSecureBootKeys(self):
-        self.cv_SYSTEM.goto_state(OpSystemState.OS)
-        for k in ["PK", "KEK", "db"]:
-            self.cv_HOST.copy_test_file_to_host(k + ".auth", sourcedir=os.path.join("test_binaries","keys"))
-            self.cv_HOST.host_run_command("cat /tmp/{0}.auth > /sys/firmware/secvar/vars/{0}/update".format(k))
+        self.cv_SYSTEM.goto_state(OpSystemState.PETITBOOT_SHELL)
+        con = self.cv_SYSTEM.console
+
+        self.getTestData()
+
+        for k in ["PK", "KEK", "db", "dbx"]:
+        #for k in ["PK", "KEK", "db"]:
+            con.run_command("cat /tmp/{0}.auth > /sys/firmware/secvar/vars/{0}/update".format(k))
 
         # System needs to power fully off to process keys on next reboot
         self.cv_SYSTEM.sys_power_off()
-        
+       
+        # TODO: Probably can do an expect or something instead
+        # need to stall because otherwise it just blows on through on its own
+ 
+        time.sleep(10)
+        self.cv_SYSTEM.goto_state(OpSystemState.OFF)
         # TODO: expect secvar logs from skiboot
+        time.sleep(10)
+        # TODO: need a better "turn on" command here
+
+        # TODO: reboot to petitboot and ensure keys enrolled
+
+        self.checkSecureBootEnabled(enabled=True)
 
 
     # TODO: figure out how to detect secure boot state
     # TODO: handle either enabled or not enabled
-    def checkSecureBootEnabled(self, enabled=True):
-        self.cv_SYSTEM.goto_state(OpSystemState.OS)
+    def checkSecureBootEnabled(self, enabled=True, physical=False):
+        self.cv_SYSTEM.goto_state(OpSystemState.PETITBOOT_SHELL)
+        con = self.cv_SYSTEM.console
 
-        self.cv_HOST.host_run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/os-secure-enforcing")
-        #self.cv_HOST.host_run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/physical-presence-asserted || true")
-        #self.cv_HOST.host_run_command("ls /sys/firmware/devicetree/base/ibm,secureboot/clear-os-keys || true")
+        con.run_command("test {} -f /sys/firmware/devicetree/base/ibm,secureboot/os-secureboot-enforcing"
+            .format("" if enabled else "!"))
+
+        if physical:
+            con.run_command("test -f /sys/firmware/devicetree/base/ibm,secureboot/physical-presence-asserted")
+            con.run_command("test -f /sys/firmware/devicetree/base/ibm,secureboot/clear-os-keys")
+
+    def checkKexecKernels(self):
+        self.cv_SYSTEM.goto_state(OpSystemState.PETITBOOT_SHELL)
+        con = self.cv_SYSTEM.console
+
+        self.getTestData(data="kernels")
+
+        # Fail unsigned kernel
+        output = con.run_command_ignore_fail("kexec -s /tmp/kernel-unsigned")
+        if "Permission denied" not in "".join(output):
+            raise Exception("bad")
+
+        # Fail dbx kernel
+        output = con.run_command_ignore_fail("kexec -s /tmp/kernel-dbx")
+        if "Permission denied" not in "".join(output):
+            raise Exception("bad")
+        
+        # Succeed good kernel
+        con.run_command("kexec -s /tmp/kernel-signed")
+#        con.run_command("kexec -e")
 
 
     def runTest(self):
         # start clean
+        # TODO: maybe clear SECBOOT partition, so there aren't any updates
+        # that might be processed when booting? is this needed?
         self.assertPhysicalPresence()
-
 
         # add secure boot keys
         self.addSecureBootKeys()
 
-        # boot to signed RHEL and
-        # check os secure boot enabled
-        self.checkSecureBootEnabled()
+        # attempt to securely boot test kernels
+        self.checkKexecKernels()
 
-        # enroll a different db key, so
-        # fail to boot an unsigned kernel
+        # TODO: check that lockdown is enabled?
 
-        # fail to boot a dbx'd kernel (TODO)
-
-        return
         # clean up after 
         self.assertPhysicalPresence()
